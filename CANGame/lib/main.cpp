@@ -1,11 +1,13 @@
 #include <Arduino.h>
 #include <CAN.h>
 #include <virtualTimer.h>
+#include <Encoder.h>
 
 // * CAN_SETUP
 const uint32_t CONNECTION_REQUEST_MESSAGE_ID = 0x000;
 const uint32_t CONNECTION_RESPONSE_MESSAGE_ID = 0x100;
 const uint32_t PLAYER_INPUT_MESSAGE_ID = 0x200;
+
 
 CAN g_can {};
 VirtualTimerGroup g_timerGroup;
@@ -125,6 +127,22 @@ void readSensors()
     SET_BIT(bitMask, 1, g_shouldMine);
     SET_BIT(bitMask, 2, g_shouldShield);
     g_bitmaskSignal = bitMask;
+
+    // Read and update encoder-based rotation
+    int32_t newPosition = g_encoder.read();
+    if (newPosition != g_lastEncoderPosition) {
+        g_rotationAxisValue += (newPosition - g_lastEncoderPosition) * 0.1f; // Scale as needed
+        g_lastEncoderPosition = newPosition;
+
+        // Update CAN signal
+        g_rotationAxisSignal = g_rotationAxisValue;
+    }
+
+    // Handle button press
+    if (g_buttonPressed) {
+        Serial.println("Encoder button pressed!");
+        g_buttonPressed = false; // Reset flag
+    }
 }
 
 
@@ -137,9 +155,32 @@ void setup()
 
     g_playerIDSignal = -1;
     g_deviceIDSignal = (int8_t)random(0, 255);
+
+    // Initialize encoder button with interrupt
+    pinMode(ENCODER_BUTTON_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(ENCODER_BUTTON_PIN), handleEncoderButton, FALLING);
+
+    // Initialize encoder position
+    g_lastEncoderPosition = g_encoder.read();
 }
 
 void loop()
 {
     g_timerGroup.Tick(millis());
+}
+
+const int ENCODER_PIN_A = 2; // Pin for encoder A
+const int ENCODER_PIN_B = 3; // Pin for encoder B
+const int ENCODER_BUTTON_PIN = 4; // Optional: Pin for encoder button
+
+Encoder g_encoder(ENCODER_PIN_A, ENCODER_PIN_B);
+volatile int32_t g_lastEncoderPosition = 0;
+float g_rotationAxisValue = 0.0; // To update g_rotationAxisSignal
+
+
+// Interupt for the button
+volatile bool g_buttonPressed = false;
+
+void IRAM_ATTR handleEncoderButton() {
+    g_buttonPressed = true;
 }
